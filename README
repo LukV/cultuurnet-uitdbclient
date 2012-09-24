@@ -1,0 +1,3 @@
+This is a Python test client for UiTdatabank "Entry API". 
+UiTdatabank Entry API allows data to be added, modified and removed from UiTdatabank. 
+Most commonly the data consider public events in Belgium. More info: http://goo.gl/WC2Xy (Dutch)
