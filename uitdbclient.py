@@ -8,19 +8,24 @@ import os
 from xml.dom.minidom import Document
 from xml.sax.handler import ContentHandler
 
+SERVER = "test.rest.uitdatabank.be"
+
 # argparser:
 parser = argparse.ArgumentParser()
 parser.add_argument("-f", "--file", help="upload CdbXML doc from your filesystem")
+parser.add_argument("-g", "--get", help="get item detail, use with --cdbid", action="store_true")
 parser.add_argument("-id", "--cdbid", help="ID of object to perform operation on")
 parser.add_argument("-v", "--verbosity", help="print parser outcome to screen", action="store_true")
 parser.add_argument("-s", "--save_report", help="save parser outcome to file", action="store_true")
 parser.add_argument("-d", "--delete", help="delete item, use with --cdbid", action="store_true")
-parser.add_argument("-k", "--keywords", help="add keywords, use with --cdbid")
 parser.add_argument("-o", "--obj_type", help="choose: event, actor, production")
-parser.add_argument("-l", "--lang", help="translation: to nl, fr, en, use with --cdbid")
-parser.add_argument("-td", "--title", help="title translation, use with --lang")
-parser.add_argument("-sd", "--shortdescription", help="short description translation, use with --lang")
-parser.add_argument("-ld", "--longdescription", help="long description translation, use with --lang")
+parser.add_argument("--keywords", help="add keywords, use with --cdbid")
+parser.add_argument("--link", help="add links, use with --cdbid")
+parser.add_argument("--linktype", help="choose: video, text, imageweb, webresource, reservations. Default: webresource")
+parser.add_argument("--lang", help="choose: nl, fr, en, use with --cdbid")
+parser.add_argument("--title", help="title translation, use with --lang")
+parser.add_argument("--shortdescription", help="short description translation, use with --lang")
+parser.add_argument("--longdescription", help="long description translation, use with --lang")
 
 if len(sys.argv)==1:
   parser.print_help()
@@ -50,15 +55,20 @@ def addkeywords(cdbid, keywords):
       
 def addtranslation(cdbid, lang, formfields):
   objecttype = _find_object_type(cdbid)
-  
   if lang:
     formfields['lang'] = lang
   else:
     print "lang is required"
     sys.exit(1)
-  
   path = "/api/v1/" + objecttype + "/" + cdbid + "/translations"
   headers = {"Content-Length" : len(formfields)}
+  httpmethod = "POST"
+  _modify_content_object(path, headers, formfields, httpmethod)
+
+def addlink(cdbid, formfields):
+  objecttype = _find_object_type(cdbid)
+  path = "/api/v1/" + objecttype + "/" + cdbid + "/links"
+  headers = {"Content-type": "application\/x-www-form-urlencoded", "Content-Length" : len(formfields)}
   httpmethod = "POST"
   _modify_content_object(path, headers, formfields, httpmethod)
       
@@ -70,6 +80,14 @@ def deleteitem(cdbid):
   httpmethod = "DELETE"
   _modify_content_object(path, headers, formfields, httpmethod)
 
+def getitem(cdbid):
+  formfields = {}
+  objecttype = _find_object_type(cdbid)
+  path = "/api/v1/" + objecttype + "/" + cdbid
+  headers = {"Content-Length" : len(cdbid)}
+  httpmethod = "GET"
+  _modify_content_object(path, headers, formfields, httpmethod)
+
 def _find_object_type(cdbid):
   if args.obj_type:
     return args.obj_type
@@ -79,7 +97,7 @@ def _find_object_type(cdbid):
   for objecttype in objecttypes:
     r1 = _connect_to_uitdb()
     userkey = _get_userkey(r1.read())
-    url = "http://test.rest.uitdatabank.be/api/v1/" + objecttype + "?q=" + cdbid + "&key=" + userkey
+    url = "http://" + SERVER + "/api/v1/" + objecttype + "?q=" + cdbid + "&key=" + userkey
     r2 = urllib2.urlopen(url)
     doc = xml.dom.minidom.parse(r2)
     nofrecords = doc.getElementsByTagName("nofrecords")
@@ -101,8 +119,8 @@ def _modify_content_object(path, headers, formfields, httpmethod):
     formfields['key'] = userkey
     params = urllib.urlencode(formfields)
     path = path + "?" + params
-    print path
-    conn = httplib.HTTPConnection("test.rest.uitdatabank.be")
+    print "url: http://" + SERVER + path
+    conn = httplib.HTTPConnection(SERVER)
     conn.request(httpmethod, path, "", headers) 
     starttime = time.time()
     response = conn.getresponse()
@@ -121,6 +139,7 @@ def _modify_content_object(path, headers, formfields, httpmethod):
       for key, value in result.items():
         print key, ':', str(value)
       print '-----------------------'
+      
   else:
     print "HTTP connection closed with error status: %s" % r1.status
     sys.exit(1)
@@ -164,7 +183,7 @@ def _process_content_objects(doc):
         params = urllib.urlencode({'key': userkey})
         headers = {"Content-type": "text/xml", "Content-Length" : len(xml_output)}
 
-        conn = httplib.HTTPConnection("test.rest.uitdatabank.be")
+        conn = httplib.HTTPConnection(SERVER)
         conn.request("POST", "/api/v1/" + item_type + "?" + params, "",headers)
         conn.send(xml_output)
         starttime = time.time()
@@ -228,24 +247,48 @@ def _get_userkey(api_response):
 
 def _connect_to_uitdb():
   try:
-    response = urllib2.urlopen("http://test.rest.uitdatabank.be/api/v1/token")
+    response = urllib2.urlopen("http://" + SERVER + "/api/v1/token")
   except urllib2.HTTPError, e:
     print "HTTP connection closed with error: %s" % e.read()
     sys.exit(1)
   return response
 
 def main():
+  # process CdbXML document to add new items or modify items in UiTDB
   if args.file:
     fileupload(args.file)
-
+    
+  # perform action on existing item
   if args.cdbid:
+  
+    # return item CdbXML
+    if args.get:
+      getitem(args.cdbid)
+  
+    # delete existing item
     if args.delete:
       deleteitem(args.cdbid)
+      
+    # add tags to item
     if args.keywords:
       addkeywords(args.cdbid, args.keywords)
-    if args.lang:
+    
+    # add links to item
+    if args.link:
+      formfields = {'link': args.link}
+      if args.lang:
+        formfields['lang'] = args.lang
+      else:
+        formfields['lang'] = 'nl'
+      if args.linktype:
+        formfields['linktype'] = args.linktype
+      else:
+        formfields['linktype'] = 'webresource'
+      addlink(args.cdbid, formfields)
+    
+    # add translations to item
+    if args.lang and (args.title or args.shortdescription or args.longdescription):
       formfields = {}
-      
       if args.title:
         formfields['title'] = args.title
       if args.shortdescription:
